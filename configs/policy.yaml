@@ -1,0 +1,15 @@
+# Standing policy rules. Patterns are sandbox-relative with the
+# canonical "sandbox/" prefix; a "zone/**" pattern also protects the
+# zone folder itself. List entries name groups (read, search,
+# mutate-content, mutate-structure) or tools (delete, move, ...).
+# An allow list is a whitelist for its path. Deny wins at equal
+# specificity; specific path beats general. Optional per-rule keys:
+# reason, alternative.
+default: allow                     # within the sandbox
+rules:
+  - path: "sandbox/originals/**"
+    deny: [mutate-content, mutate-structure]   # read-only archive
+  - path: "sandbox/.index.json"
+    deny: [delete, move]                        # agent maintains it, can't destroy it
+  - path: "sandbox/inbox/**"
+    allow: [read, search, move]                 # may file things away, not edit them

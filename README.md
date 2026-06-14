@@ -47,6 +47,17 @@ corresponding package is installed (`langchain-anthropic` /
 
 Edit `configs/models.yaml` to change the picker's choices or default.
 
+### Configuration via `.env`
+
+Copy [`.env.example`](.env.example) to `.env` and fill in the keys you need —
+it's loaded automatically on startup (`cli/repl.py:load_env`) and never
+overrides variables already set in your shell.
+
+To enable [LangSmith](https://smith.langchain.com) tracing, set
+`LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` in `.env`. Each session is
+tagged with its model and session ID, and traces are grouped under the
+`LANGSMITH_PROJECT` project (defaults to `fsagent`).
+
 ## The pipeline
 
 Every tool call passes through, in order:

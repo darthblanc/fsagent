@@ -16,7 +16,7 @@ never silently pretends reversibility where there is none.
 
 ```sh
 uv venv && uv pip install -e ".[dev]"
-uv run pytest        # 303 tests
+uv run pytest        # 363 tests
 ```
 
 ## Running the agent
@@ -120,7 +120,7 @@ core/          schema, pipeline, policy, friction, git, tiers, trajectory
 functions/     byte-level primitives — raw work only
 tools/         the 12 tool definitions + execute handlers
 configs/       policy.yaml (standing rules)
-tests/         303 tests, written test-first
+tests/         363 tests, written test-first
 sandbox/       where the world ends — the agent acts only in here
 trajectories/  session JSONL logs
 agent/ cli/ prompts/   future layers (see docs/roadmap.md)

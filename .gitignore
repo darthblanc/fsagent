@@ -36,3 +36,5 @@ htmlcov/
 
 # OS cruft
 .DS_Store
+
+*.jsonl

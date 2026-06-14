@@ -1,0 +1,19 @@
+# Models offered by the fsagent CLI's picker (cli/models.py).
+# Each entry is a provider-prefixed model string, as accepted by
+# create_agent/init_chat_model. `default` is used when the user presses
+# enter at the picker, or runs fsagent without --model.
+#
+# Edit this list to match what you have access to: any "anthropic:...",
+# "openai:...", or "ollama:..." model works, as long as the corresponding
+# package is installed (langchain-anthropic / langchain-openai /
+# langchain-ollama) and, for ollama, the model has been pulled locally.
+default: anthropic:claude-opus-4-8
+models:
+  - anthropic:claude-opus-4-8
+  - anthropic:claude-sonnet-4-6
+  - anthropic:claude-haiku-4-5
+  - openai:gpt-5.5
+  - ollama:qwen3:8b
+  - ollama:qwen3:4b
+  - ollama:qwen2.5:3b
+  - ollama:llama3.1:latest

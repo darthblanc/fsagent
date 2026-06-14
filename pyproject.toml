@@ -7,7 +7,16 @@ name = "fsagent"
 version = "0.1.0"
 description = "Filesystem agent with a policy-aware tool interface"
 requires-python = ">=3.10"
-dependencies = ["pydantic>=2", "pyyaml>=6", "langchain", "langgraph", "langchain-anthropic", "langchain-openai", "langchain-ollama"]
+dependencies = [
+    "pydantic>=2",
+    "pyyaml>=6",
+    "langchain",
+    "langgraph",
+    "langchain-anthropic",
+    "langchain-openai",
+    "langchain-ollama",
+    "python-dotenv>=1.2.2",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]

@@ -14,7 +14,7 @@ from langgraph.types import Command
 
 from agent import load_system_prompt
 from agent.tools import Approvals, build_tools
-from cli.repl import MODEL, build_pipeline, make_session_id
+from cli.repl import MODEL, build_pipeline, load_env, make_session_id
 
 
 def auto_decision(payload: dict) -> str:
@@ -23,6 +23,7 @@ def auto_decision(payload: dict) -> str:
 
 
 def main() -> None:
+    load_env()
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         sandbox_root = root / "sandbox"

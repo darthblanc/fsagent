@@ -1,3 +1,4 @@
+import os
 import re
 import readline
 
@@ -5,7 +6,70 @@ import pytest
 from langgraph.types import Interrupt
 
 from cli.models import load_model_config
-from cli.repl import build_pipeline, cli_decision, load_history, main, make_session_id, save_history
+from cli.repl import (
+    build_pipeline,
+    cli_decision,
+    load_env,
+    load_history,
+    main,
+    make_session_id,
+    save_history,
+)
+
+
+def test_load_env_reads_dotenv_file(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("FSAGENT_TEST_VAR=from-dotenv\n")
+
+    try:
+        load_env(env_path)
+        assert os.environ["FSAGENT_TEST_VAR"] == "from-dotenv"
+    finally:
+        os.environ.pop("FSAGENT_TEST_VAR", None)
+
+
+def test_load_env_does_not_override_existing_env_var(tmp_path, monkeypatch):
+    env_path = tmp_path / ".env"
+    env_path.write_text("FSAGENT_TEST_VAR=from-dotenv\n")
+    monkeypatch.setenv("FSAGENT_TEST_VAR", "from-shell")
+
+    load_env(env_path)
+
+    assert os.environ["FSAGENT_TEST_VAR"] == "from-shell"
+
+
+def test_load_env_missing_file_does_not_raise(tmp_path):
+    load_env(tmp_path / "no-such-env")
+
+
+def test_load_env_sets_default_langsmith_project(tmp_path, monkeypatch):
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+    monkeypatch.delenv("LANGCHAIN_PROJECT", raising=False)
+
+    try:
+        load_env(tmp_path / "no-such-env")
+        assert os.environ["LANGSMITH_PROJECT"] == "fsagent"
+    finally:
+        os.environ.pop("LANGSMITH_PROJECT", None)
+
+
+def test_load_env_does_not_override_existing_langsmith_project(tmp_path, monkeypatch):
+    monkeypatch.setenv("LANGSMITH_PROJECT", "custom-project")
+
+    load_env(tmp_path / "no-such-env")
+
+    assert os.environ["LANGSMITH_PROJECT"] == "custom-project"
+
+
+def test_load_env_does_not_override_existing_langchain_project(tmp_path, monkeypatch):
+    monkeypatch.delenv("LANGSMITH_PROJECT", raising=False)
+    monkeypatch.setenv("LANGCHAIN_PROJECT", "custom-project")
+
+    try:
+        load_env(tmp_path / "no-such-env")
+        assert "LANGSMITH_PROJECT" not in os.environ
+    finally:
+        os.environ.pop("LANGSMITH_PROJECT", None)
 
 
 def test_make_session_id_format():
@@ -59,8 +123,10 @@ class FakeMessage:
 class FakeAgent:
     def __init__(self, responses):
         self._responses = list(responses)
+        self.configs = []
 
     def invoke(self, _input, config=None):
+        self.configs.append(config)
         return self._responses.pop(0)
 
 
@@ -115,6 +181,25 @@ def test_main_handles_interrupt_and_resumes(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "exists (1 lines)" in out
     assert "done" in out
+
+
+def test_main_tags_agent_config_for_observability(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+    monkeypatch.setattr("cli.repl.make_session_id", lambda: "s-test")
+
+    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "anthropic:claude-opus-4-8"])
+
+    config = fake_agent.configs[0]
+    assert config["configurable"]["thread_id"] == "s-test"
+    assert config["tags"] == ["anthropic:claude-opus-4-8"]
+    assert config["metadata"] == {"session_id": "s-test", "model": "anthropic:claude-opus-4-8"}
 
 
 def test_main_uses_model_flag(tmp_path, monkeypatch, capsys):

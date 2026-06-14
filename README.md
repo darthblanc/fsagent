@@ -19,6 +19,34 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest        # 303 tests
 ```
 
+## Running the agent
+
+```sh
+uv run fsagent
+```
+
+This starts an interactive REPL backed by the agent in [agent/](agent/), acting
+on files under [sandbox/](sandbox/). On startup you'll be prompted to pick a
+model from [configs/models.yaml](configs/models.yaml) (press enter for the
+default), or skip the picker with `--model`:
+
+```sh
+uv run fsagent --model anthropic:claude-sonnet-4-6
+uv run fsagent --model openai:gpt-5.5
+uv run fsagent --model ollama:qwen3:8b
+```
+
+Any `anthropic:...`, `openai:...`, or `ollama:...` model works as long as the
+corresponding package is installed (`langchain-anthropic` /
+`langchain-openai` / `langchain-ollama`, all included by default) and:
+
+- **anthropic** — `ANTHROPIC_API_KEY` is set
+- **openai** — `OPENAI_API_KEY` is set
+- **ollama** — a local Ollama server is running and the model has been pulled
+  (`ollama pull <model>`)
+
+Edit `configs/models.yaml` to change the picker's choices or default.
+
 ## The pipeline
 
 Every tool call passes through, in order:

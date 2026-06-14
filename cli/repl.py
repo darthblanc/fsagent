@@ -1,11 +1,13 @@
 """Minimal REPL: wires Pipeline + agent tools to a LangChain agent loop."""
 
 import argparse
+import os
 import readline
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -23,7 +25,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SANDBOX_ROOT = REPO_ROOT / "sandbox"
 TRAJECTORIES_DIR = REPO_ROOT / "trajectories"
 POLICY_PATH = REPO_ROOT / "configs" / "policy.yaml"
+ENV_FILE = REPO_ROOT / ".env"
 HISTORY_FILE = Path.home() / ".fsagent_history"
+
+
+def load_env(path: Path = ENV_FILE) -> None:
+    load_dotenv(path)
+    if "LANGSMITH_PROJECT" not in os.environ and "LANGCHAIN_PROJECT" not in os.environ:
+        os.environ["LANGSMITH_PROJECT"] = "fsagent"
 
 
 def load_history(path: Path = HISTORY_FILE) -> None:
@@ -77,6 +86,7 @@ def cli_decision(payload: dict) -> str:
 
 
 def main(argv=None) -> None:
+    load_env()
     args = parse_args(argv)
     model = select_model(load_model_config(), flag=args.model, input_func=input)
     print(f"model: {model}")
@@ -90,7 +100,11 @@ def main(argv=None) -> None:
         system_prompt=load_system_prompt(),
         checkpointer=InMemorySaver(),
     )
-    config = {"configurable": {"thread_id": session_id}}
+    config = {
+        "configurable": {"thread_id": session_id},
+        "tags": [model],
+        "metadata": {"session_id": session_id, "model": model},
+    }
 
     load_history(HISTORY_FILE)
     while True:

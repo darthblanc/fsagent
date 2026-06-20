@@ -53,6 +53,13 @@ class TestFlatListing:
         (tmp_path / "a.txt").write_text("x\n")
         assert run(tmp_path, depth=3) == "a.txt · file · 2"
 
+    def test_fsagent_dir_is_filtered_from_display(self, tmp_path):
+        scratchpad_dir = tmp_path / ".fsagent"
+        scratchpad_dir.mkdir()
+        (scratchpad_dir / "scratchpad.md").write_text("x\n")
+        (tmp_path / "a.txt").write_text("x\n")
+        assert run(tmp_path, depth=3) == "a.txt · file · 2"
+
 
 class TestPagination:
     @pytest.fixture

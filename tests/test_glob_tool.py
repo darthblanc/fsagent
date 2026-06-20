@@ -54,6 +54,14 @@ class TestMatching:
         assert run("**/*.csv", scope=tmp_path) == "new.csv"
         assert run("_t*", scope=tmp_path) == "no matches for '_t*'"
 
+    def test_fsagent_subtree_is_invisible(self, tmp_path):
+        scratchpad_dir = tmp_path / ".fsagent"
+        scratchpad_dir.mkdir()
+        (scratchpad_dir / "scratchpad.md").write_text("x\n")
+        (tmp_path / "new.csv").write_text("x\n")
+        assert run("**/*", scope=tmp_path) == "new.csv"
+        assert run(".fsagent*", scope=tmp_path) == "no matches for '.fsagent*'"
+
 
 class TestPagination:
     @pytest.fixture

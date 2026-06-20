@@ -62,6 +62,13 @@ class TestFilesMode:
         (tmp_path / "live.txt").write_text("target\n")
         assert run("target", scope=tmp_path) == "live.txt · 1"
 
+    def test_fsagent_contents_are_not_searched(self, tmp_path):
+        scratchpad_dir = tmp_path / ".fsagent"
+        scratchpad_dir.mkdir()
+        (scratchpad_dir / "scratchpad.md").write_text("target\n")
+        (tmp_path / "live.txt").write_text("target\n")
+        assert run("target", scope=tmp_path) == "live.txt · 1"
+
 
 class TestContentMode:
     def test_match_with_context_feeds_read_and_edit(self, root):

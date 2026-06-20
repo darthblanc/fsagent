@@ -16,3 +16,10 @@ def test_system_prompt_explains_retry_and_approval():
     lower = prompt.lower()
     assert "retry" in lower or "re-read" in lower
     assert "approv" in lower
+
+
+def test_system_prompt_explains_scratchpad():
+    prompt = load_system_prompt()
+    lower = prompt.lower()
+    assert "scratchpad" in lower
+    assert ".fsagent" in lower

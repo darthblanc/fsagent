@@ -138,6 +138,15 @@ class TestFolder:
         assert result["subtree_size_bytes"] == 65
         assert result["by_extension"] == {"csv": 2, "pdf": 1, "txt": 1}
 
+    def test_folder_stats_exclude_fsagent(self, root):
+        scratchpad_dir = root / ".fsagent"
+        scratchpad_dir.mkdir()
+        (scratchpad_dir / "scratchpad.md").write_bytes(b"x" * 1000)
+        result = result_of(root)
+        assert result["entries"] == {"files": 2, "dirs": 1}
+        assert result["subtree_size_bytes"] == 65
+        assert result["by_extension"] == {"csv": 2, "pdf": 1, "txt": 1}
+
 
 class TestFailureShaping:
     def test_not_found_suggests_similar_paths(self, tmp_path):

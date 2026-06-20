@@ -2,6 +2,7 @@ import pytest
 from langchain_core.tools import ToolException
 
 from agent.tools import Approvals, build_tools
+from cli.repl import ToolActivityCallback
 from core.policy import PolicyDecision
 from tests.test_pipeline import make_pipeline
 
@@ -189,3 +190,44 @@ def test_recursive_declined_raises_tool_exception(tmp_path, monkeypatch):
 
     assert "did not approve" in str(excinfo.value)
     assert (root / "folder").exists()
+
+
+def test_write_tool_invoke_triggers_callback_with_path_and_diff(tmp_path, capsys):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    tools = build_tools(pipeline, Approvals())
+    write = get_tool(tools, "write")
+    callback = ToolActivityCallback()
+
+    write.invoke({"path": "note.txt", "content": "hello\n"}, config={"callbacks": [callback]})
+
+    out = capsys.readouterr().out
+    assert "[write] note.txt" in out
+    assert "+hello" in out
+
+
+def test_edit_tool_invoke_triggers_callback_with_diff(tmp_path, capsys):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("old\n")
+    tools = build_tools(pipeline, Approvals())
+    edit = get_tool(tools, "edit")
+    callback = ToolActivityCallback()
+
+    edit.invoke({"path": "a.txt", "old_str": "old", "new_str": "new"}, config={"callbacks": [callback]})
+
+    out = capsys.readouterr().out
+    assert "[edit] a.txt" in out
+    assert "+new" in out
+
+
+def test_read_tool_invoke_triggers_start_print_only(tmp_path, capsys):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("hello\n")
+    tools = build_tools(pipeline, Approvals())
+    read = get_tool(tools, "read")
+    callback = ToolActivityCallback()
+
+    read.invoke({"path": "a.txt"}, config={"callbacks": [callback]})
+
+    out = capsys.readouterr().out
+    assert "[read] a.txt" in out
+    assert "hello" not in out

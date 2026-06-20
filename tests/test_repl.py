@@ -1,12 +1,19 @@
 import os
 import re
 import readline
+import uuid
 
 import pytest
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.messages import ToolMessage
 from langgraph.types import Interrupt
 
 from cli.models import load_model_config
 from cli.repl import (
+    SUMMARIZATION_MODEL,
+    AnnouncingSummarizationMiddleware,
+    ToolActivityCallback,
     build_pipeline,
     cli_decision,
     load_env,
@@ -15,6 +22,11 @@ from cli.repl import (
     make_session_id,
     save_history,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_history_file(tmp_path, monkeypatch):
+    monkeypatch.setattr("cli.repl.HISTORY_FILE", tmp_path / "history")
 
 
 def test_load_env_reads_dotenv_file(tmp_path):
@@ -115,6 +127,87 @@ def test_cli_decision_maps_input(monkeypatch, raw, expected):
     assert cli_decision(payload) == expected
 
 
+def test_on_tool_start_prints_path_and_action_for_watched_tools(capsys):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+
+    callback.on_tool_start(
+        {"name": "write"}, "", run_id=run_id, inputs={"path": "note.txt", "content": "hi"}
+    )
+
+    assert "[write] note.txt" in capsys.readouterr().out
+
+
+def test_on_tool_start_ignores_unwatched_tools(capsys):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+
+    callback.on_tool_start({"name": "list_dir"}, "", run_id=run_id, inputs={"path": "."})
+
+    assert capsys.readouterr().out == ""
+
+
+def test_on_tool_end_prints_diff_for_write(capsys):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+    callback.on_tool_start(
+        {"name": "write"}, "", run_id=run_id, inputs={"path": "note.txt", "content": "hi"}
+    )
+    capsys.readouterr()
+
+    callback.on_tool_end("--- a/note.txt\n+++ b/note.txt\n+hi", run_id=run_id)
+
+    assert "+hi" in capsys.readouterr().out
+
+
+def test_on_tool_end_unwraps_tool_message_content(capsys):
+    # LangGraph's ToolNode invokes tools with a ToolCall-shaped input, which
+    # makes the tool wrap its string return value in a ToolMessage before
+    # on_tool_end sees it — print the diff text, not the message repr.
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+    callback.on_tool_start(
+        {"name": "edit"}, "", run_id=run_id, inputs={"path": "hello.py", "old_str": "a", "new_str": "b"}
+    )
+    capsys.readouterr()
+
+    diff = '--- a/hello.py\n+++ b/hello.py\n@@ -1 +1 @@\n-a\n+b'
+    callback.on_tool_end(ToolMessage(content=diff, name="edit", tool_call_id="call_1"), run_id=run_id)
+
+    out = capsys.readouterr().out
+    assert out == diff + "\n"
+
+
+def test_on_tool_end_does_not_print_for_read(capsys):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+    callback.on_tool_start({"name": "read"}, "", run_id=run_id, inputs={"path": "note.txt"})
+    capsys.readouterr()
+
+    callback.on_tool_end("     1\thello", run_id=run_id)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_on_tool_end_for_unknown_run_id_does_not_raise():
+    callback = ToolActivityCallback()
+    callback.on_tool_end("whatever", run_id=uuid.uuid4())
+
+
+def test_on_tool_error_clears_state_without_printing(capsys):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+    callback.on_tool_start(
+        {"name": "write"}, "", run_id=run_id, inputs={"path": "note.txt", "content": "x"}
+    )
+    capsys.readouterr()
+
+    callback.on_tool_error(ValueError("boom"), run_id=run_id)
+
+    assert capsys.readouterr().out == ""
+    assert run_id not in callback._runs
+
+
 class FakeMessage:
     def __init__(self, text):
         self.text = text
@@ -202,6 +295,23 @@ def test_main_tags_agent_config_for_observability(tmp_path, monkeypatch, capsys)
     assert config["metadata"] == {"session_id": "s-test", "model": "anthropic:claude-opus-4-8"}
 
 
+def test_main_attaches_tool_activity_callback(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "anthropic:claude-opus-4-8"])
+
+    callbacks = fake_agent.configs[0]["callbacks"]
+    assert len(callbacks) == 1
+    assert isinstance(callbacks[0], ToolActivityCallback)
+
+
 def test_main_uses_model_flag(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
     monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
@@ -225,6 +335,16 @@ def test_main_uses_model_flag(tmp_path, monkeypatch, capsys):
 
 def test_load_history_missing_file_does_not_raise(tmp_path):
     load_history(tmp_path / "no-such-history")
+
+
+def test_load_history_unparseable_file_does_not_raise(tmp_path):
+    # Missing libedit's "_HiStOrY_V2_" header — e.g. written by a GNU-readline
+    # build of Python on a different machine. libedit's reader rejects this
+    # with OSError rather than treating it as empty.
+    history_path = tmp_path / "history"
+    history_path.write_text("hi\n")
+
+    load_history(history_path)
 
 
 def test_save_and_load_history_roundtrip(tmp_path):
@@ -256,6 +376,101 @@ def test_main_persists_history(tmp_path, monkeypatch, capsys):
 
     assert history_path.exists()
     assert "hi" in history_path.read_text()
+
+
+def test_main_enables_anthropic_prompt_caching(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    captured_kwargs = {}
+
+    def fake_create_agent(model, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+
+    monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "anthropic:claude-opus-4-8"])
+
+    middleware = captured_kwargs["middleware"]
+    assert len(middleware) == 2
+    assert isinstance(middleware[0], AnthropicPromptCachingMiddleware)
+
+
+def test_main_enables_summarization_middleware(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    captured_kwargs = {}
+
+    def fake_create_agent(model, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+
+    monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "anthropic:claude-opus-4-8"])
+
+    middleware = captured_kwargs["middleware"]
+    summarization = [m for m in middleware if isinstance(m, SummarizationMiddleware)]
+    assert len(summarization) == 1
+    assert summarization[0].trigger == ("tokens", 800_000)
+    assert summarization[0].keep == ("tokens", 150_000)
+    assert summarization[0].trim_tokens_to_summarize == 150_000
+    assert summarization[0].model.model == "claude-haiku-4-5"
+
+
+def test_announcing_summarization_prints_notice_when_triggered(monkeypatch, capsys):
+    middleware = AnnouncingSummarizationMiddleware(model=SUMMARIZATION_MODEL)
+    sentinel = {"messages": ["whatever"]}
+    monkeypatch.setattr(
+        SummarizationMiddleware, "before_model", lambda self, state, runtime: sentinel
+    )
+
+    result = middleware.before_model({}, None)
+
+    assert result is sentinel
+    assert "summarization" in capsys.readouterr().out.lower()
+
+
+def test_announcing_summarization_silent_when_not_triggered(monkeypatch, capsys):
+    middleware = AnnouncingSummarizationMiddleware(model=SUMMARIZATION_MODEL)
+    monkeypatch.setattr(
+        SummarizationMiddleware, "before_model", lambda self, state, runtime: None
+    )
+
+    result = middleware.before_model({}, None)
+
+    assert result is None
+    assert capsys.readouterr().out == ""
+
+
+def test_main_skips_summarization_for_model_without_profile(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    captured_kwargs = {}
+
+    def fake_create_agent(model, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+
+    monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "ollama:qwen3:8b"])
+
+    middleware = captured_kwargs["middleware"]
+    summarization = [m for m in middleware if isinstance(m, SummarizationMiddleware)]
+    assert summarization == []
 
 
 def test_main_without_flag_uses_picker(tmp_path, monkeypatch, capsys):

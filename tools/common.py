@@ -30,9 +30,16 @@ HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 # Deleted entries are staged here by the harness, below the membrane.
 TRASH_DIR = "_trash"
 
-# Harness plumbing the model never observes: read/search tools filter
-# these from every listing, match set, scan, and folder summary.
-HIDDEN_DIRS = frozenset({TRASH_DIR, ".git"})
+# The model's own scratchpad (prompts/system.md) — unlike TRASH_DIR/.git,
+# the model knows this path and writes to it directly; it's filtered from
+# listings below only so it doesn't clutter casual browsing.
+SCRATCHPAD_DIR = ".fsagent"
+
+# Filtered from every listing, match set, scan, and folder summary so
+# read/search tools don't surface them. _trash and .git are harness
+# plumbing the model never observes at all; .fsagent is reachable by
+# direct path, just hidden from browsing.
+HIDDEN_DIRS = frozenset({TRASH_DIR, ".git", SCRATCHPAD_DIR})
 
 _SNIFF_BYTES = 8192
 

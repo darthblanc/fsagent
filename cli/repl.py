@@ -9,6 +9,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
+from langchain.chat_models import init_chat_model
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -27,6 +31,7 @@ TRAJECTORIES_DIR = REPO_ROOT / "trajectories"
 POLICY_PATH = REPO_ROOT / "configs" / "policy.yaml"
 ENV_FILE = REPO_ROOT / ".env"
 HISTORY_FILE = Path.home() / ".fsagent_history"
+SUMMARIZATION_MODEL = "anthropic:claude-haiku-4-5"
 
 
 def load_env(path: Path = ENV_FILE) -> None:
@@ -38,8 +43,8 @@ def load_env(path: Path = ENV_FILE) -> None:
 def load_history(path: Path = HISTORY_FILE) -> None:
     try:
         readline.read_history_file(path)
-    except FileNotFoundError:
-        pass
+    except OSError:
+        pass  # missing, unreadable, or a format libedit's history parser rejects
 
 
 def save_history(path: Path = HISTORY_FILE) -> None:
@@ -85,6 +90,51 @@ def cli_decision(payload: dict) -> str:
     return "no"
 
 
+_WATCHED_TOOLS = {"read", "write", "edit"}
+_DIFF_TOOLS = {"write", "edit"}
+
+
+class ToolActivityCallback(BaseCallbackHandler):
+    """Prints path+action when read/write/edit start, and the diff on write/edit success."""
+
+    def __init__(self):
+        self._runs: dict = {}
+
+    def on_tool_start(self, serialized, input_str, *, run_id, inputs=None, **kwargs):
+        name = serialized.get("name")
+        if name not in _WATCHED_TOOLS:
+            return
+        path = (inputs or {}).get("path")
+        print(f"[{name}] {path}")
+        self._runs[run_id] = name
+
+    def on_tool_end(self, output, *, run_id, **kwargs):
+        name = self._runs.pop(run_id, None)
+        if name in _DIFF_TOOLS:
+            print(getattr(output, "content", output))
+
+    def on_tool_error(self, error, *, run_id, **kwargs):
+        self._runs.pop(run_id, None)
+
+
+class AnnouncingSummarizationMiddleware(SummarizationMiddleware):
+    """Like SummarizationMiddleware, but prints a notice when it actually fires.
+
+    LangGraph wires middleware before_model hooks with trace=False, so
+    callback handlers (e.g. ToolActivityCallback) never see this happen —
+    overriding before_model is the only way to observe it.
+    """
+
+    def before_model(self, state, runtime):
+        result = super().before_model(state, runtime)
+        if result is not None:
+            print(
+                "\n[summarization] condensed earlier conversation history "
+                "to stay under the context limit\n"
+            )
+        return result
+
+
 def main(argv=None) -> None:
     load_env()
     args = parse_args(argv)
@@ -94,16 +144,35 @@ def main(argv=None) -> None:
     session_id = make_session_id()
     pipeline = build_pipeline(session_id)
     approvals = Approvals()
+
+    resolved_model = init_chat_model(model)
+    middleware = [AnthropicPromptCachingMiddleware()]
+    profile = getattr(resolved_model, "profile", None)
+    max_input_tokens = profile.get("max_input_tokens") if isinstance(profile, dict) else None
+    if isinstance(max_input_tokens, int):
+        middleware.append(
+            AnnouncingSummarizationMiddleware(
+                model=SUMMARIZATION_MODEL,
+                trigger=("tokens", int(max_input_tokens * 0.8)),
+                keep=("tokens", int(max_input_tokens * 0.15)),
+                trim_tokens_to_summarize=150_000,
+            )
+        )
+    else:
+        print(f"note: no context-window profile for {model}; skipping auto-summarization")
+
     agent = create_agent(
         model,
         tools=build_tools(pipeline, approvals),
         system_prompt=load_system_prompt(),
         checkpointer=InMemorySaver(),
+        middleware=middleware,
     )
     config = {
         "configurable": {"thread_id": session_id},
         "tags": [model],
         "metadata": {"session_id": session_id, "model": model},
+        "callbacks": [ToolActivityCallback()],
     }
 
     load_history(HISTORY_FILE)

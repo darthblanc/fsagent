@@ -47,7 +47,8 @@ JSON budget makes this schema the most load-bearing in the system.
 Structure is parsed only for tier-1 files: binaries get no structure, and
 tier-3 files are **never content-parsed** (their tier is decided by size
 alone) — the probe stays cheap even on a 50 MB file. Folder summaries
-exclude harness plumbing (`_trash/`, `.git`).
+exclude harness plumbing (`_trash/`, `.git`) and the model's own
+`.fsagent/` scratchpad (kept out to avoid clutter, not secrecy).
 
 ## Failure shaping
 

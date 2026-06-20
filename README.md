@@ -16,7 +16,7 @@ never silently pretends reversibility where there is none.
 
 ```sh
 uv venv && uv pip install -e ".[dev]"
-uv run pytest        # 363 tests
+uv run pytest        # 385 tests
 ```
 
 ## Running the agent
@@ -57,6 +57,17 @@ To enable [LangSmith](https://smith.langchain.com) tracing, set
 `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` in `.env`. Each session is
 tagged with its model and session ID, and traces are grouped under the
 `LANGSMITH_PROJECT` project (defaults to `fsagent`).
+
+### Long sessions
+
+For models with a known context window, `cli/repl.py` wires in
+`SummarizationMiddleware` to condense earlier turns once the conversation
+nears the limit, and prints a `[summarization] ...` notice whenever it
+actually fires — it's never silent. The model also keeps its own notes at
+`.fsagent/scratchpad.md` inside the sandbox (hidden from `list_dir`/`glob`/
+`grep`/`inspect`, reachable by direct path) so it can recover its current
+goal and progress if a summary loses specifics. See
+[FLAGS.md](FLAGS.md#resolved) for the design notes.
 
 ## The pipeline
 
@@ -119,9 +130,11 @@ Open design debts are tracked in [FLAGS.md](FLAGS.md).
 core/          schema, pipeline, policy, friction, git, tiers, trajectory
 functions/     byte-level primitives — raw work only
 tools/         the 12 tool definitions + execute handlers
-configs/       policy.yaml (standing rules)
-tests/         363 tests, written test-first
+configs/       policy.yaml (standing rules), models.yaml (picker choices)
+agent/         StructuredTool wrappers, args schemas, system prompt loader
+cli/           the `fsagent` REPL entry point, model picker
+prompts/       system.md — the model-facing behavior contract
+tests/         385 tests, written test-first
 sandbox/       where the world ends — the agent acts only in here
 trajectories/  session JSONL logs
-agent/ cli/ prompts/   future layers (see docs/roadmap.md)
 ```

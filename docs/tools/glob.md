@@ -39,7 +39,9 @@ No matches is information, not an error: `no matches for '*.rs'`.
   policy-checks as the effective scope — defaulting never bypasses
   [policy](../policy.md).
 - `_trash/` and `.git/` subtrees are invisible to matches
-  ([Tiers & recovery](../tiers-and-recovery.md)).
+  ([Tiers & recovery](../tiers-and-recovery.md)); so is `.fsagent/`, the
+  model's own scratchpad — kept out of matches to avoid clutter, not
+  secrecy ([Architecture](../architecture.md#the-membrane)).
 
 ## Failure shaping
 

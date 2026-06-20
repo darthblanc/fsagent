@@ -60,6 +60,12 @@ filesystem. Its rules:
   and the git repository itself live below the membrane: read and search
   tools filter them (`HIDDEN_DIRS` in `tools/common.py`), and confirmations
   never mention them. See [Tiers & recovery](tiers-and-recovery.md).
+- **The model's own scratchpad is hidden from browsing, not from the
+  model.** `.fsagent/scratchpad.md` is also filtered via `HIDDEN_DIRS`, but
+  for a different reason than `_trash`/`.git`: the model is told this exact
+  path in `prompts/system.md` and addresses it directly with its normal
+  tools — it's just kept out of `list_dir`/`glob`/`grep`/`inspect` so it
+  doesn't clutter casual browsing of the sandbox.
 
 ## Design principles
 
@@ -95,5 +101,8 @@ configs/policy.yaml    standing policy rules
 tests/                 the whole suite, written test-first
 sandbox/               the agent's world
 trajectories/          session logs
-agent/ cli/ prompts/   future layers — see [Roadmap](roadmap.md)
+agent/                 schema.py (Pydantic args_schema), tools.py (StructuredTool +
+                       Approvals/interrupt gate), __init__.py (load_system_prompt)
+cli/                   repl.py (the `fsagent` entry point), models.py (picker)
+prompts/               system.md — the model-facing behavior contract
 ```

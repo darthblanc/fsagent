@@ -44,6 +44,8 @@ entries 1–200 of 431 — next: offset=200
   the model should reason about.
 - `_trash/` and `.git/` — harness plumbing
   ([Tiers & recovery](../tiers-and-recovery.md)).
+- `.fsagent/` — the model's own scratchpad; hidden from listings to avoid
+  clutter, not from the model ([Architecture](../architecture.md#the-membrane)).
 
 ## Failure shaping
 

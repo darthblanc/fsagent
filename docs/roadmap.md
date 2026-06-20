@@ -11,7 +11,8 @@ resolved (the Resolved section keeps the history). Summary as of June 2026:
 1. **`fsagent history <path>` + session `--scope`** (cli/) — the command that
    makes "tier-1/2 deletions are recoverable" actionable; `fsagent
    empty-trash` pairs with it; `--scope` intersects the standing
-   [policy](policy.md) as a narrowing wrapper.
+   [policy](policy.md) as a narrowing wrapper. `agent/`, `cli/`, and
+   `prompts/` are otherwise built — see [Architecture](architecture.md#directory-map).
 2. **Write/edit handler extensions** — format-aware write validation and
    structured edit selectors (a JSON path, a CSV cell), reusing the
    per-format handlers read/inspect already have.
@@ -19,14 +20,6 @@ resolved (the Resolved section keeps the history). Summary as of June 2026:
 4. **Composed `policy_union` reconciliation** — validate declared unions
    against the actual groups of composed functions, once a function→group
    registry exists.
-
-## Unbuilt layers
-
-| Directory | Purpose |
-|---|---|
-| `agent/` | the agent loop: model ↔ pipeline, session summaries from the [trajectory](trajectory.md) |
-| `cli/` | session entry point: `--scope`, `history`, `empty-trash` |
-| `prompts/` | system prompts and conventions for deployments |
 
 ## The transform group
 

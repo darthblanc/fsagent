@@ -61,7 +61,8 @@ Content mode returns file content, so it additionally requires
 `read(scope)` via the `conditional_groups` hook — find-but-not-read zones
 stay sealed while files mode keeps working. See
 [Policy](../policy.md#mode-conditional-requirements). Binary files,
-`_trash/`, and `.git/` are skipped.
+`_trash/`, `.git/`, and `.fsagent/` (the model's own scratchpad) are
+skipped.
 
 ## Deferred
 

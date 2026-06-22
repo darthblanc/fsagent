@@ -16,7 +16,8 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from agent import load_system_prompt
+from agent import load_subagent_system_prompt, load_system_prompt
+from agent.subagent import build_subagent_tool
 from agent.tools import Approvals, build_tools
 from cli.models import load_model_config, select_model
 from core.pipeline import Pipeline
@@ -90,28 +91,47 @@ def cli_decision(payload: dict) -> str:
     return "no"
 
 
-_WATCHED_TOOLS = {"read", "write", "edit"}
-_DIFF_TOOLS = {"write", "edit"}
+def stream_response(agent, input_, config) -> dict | None:
+    """Streams one turn, printing assistant text as it arrives.
+
+    Returns the interrupt payload dict if the run paused for approval, else None.
+    """
+    interrupt_payload = None
+    printed = False
+    for mode, data in agent.stream(input_, config=config, stream_mode=["messages", "values"]):
+        if mode == "messages":
+            message, _metadata = data
+            if getattr(message, "type", None) == "tool":
+                continue  # ToolActivityCallback already printed this result
+            if message.text:
+                print(message.text, end="", flush=True)
+                printed = True
+        elif mode == "values" and "__interrupt__" in data:
+            interrupt_payload = data["__interrupt__"][0].value
+    if printed:
+        print()
+    return interrupt_payload
+
+
+_LABEL_KEYS = ("path", "src", "pattern", "task")
 
 
 class ToolActivityCallback(BaseCallbackHandler):
-    """Prints path+action when read/write/edit start, and the diff on write/edit success."""
+    """Prints a header when any tool starts, and its result when it ends."""
 
     def __init__(self):
         self._runs: dict = {}
 
     def on_tool_start(self, serialized, input_str, *, run_id, inputs=None, **kwargs):
         name = serialized.get("name")
-        if name not in _WATCHED_TOOLS:
-            return
-        path = (inputs or {}).get("path")
-        print(f"[{name}] {path}")
+        inputs = inputs or {}
+        label = next((inputs[key] for key in _LABEL_KEYS if key in inputs), "")
+        print(f"[{name}] {label}")
         self._runs[run_id] = name
 
     def on_tool_end(self, output, *, run_id, **kwargs):
-        name = self._runs.pop(run_id, None)
-        if name in _DIFF_TOOLS:
-            print(getattr(output, "content", output))
+        self._runs.pop(run_id, None)
+        print(getattr(output, "content", output))
 
     def on_tool_error(self, error, *, run_id, **kwargs):
         self._runs.pop(run_id, None)
@@ -146,7 +166,9 @@ def main(argv=None) -> None:
     approvals = Approvals()
 
     resolved_model = init_chat_model(model)
-    middleware = [AnthropicPromptCachingMiddleware()]
+    middleware = []
+    if model.split(":", 1)[0] == "anthropic":
+        middleware.append(AnthropicPromptCachingMiddleware())
     profile = getattr(resolved_model, "profile", None)
     max_input_tokens = profile.get("max_input_tokens") if isinstance(profile, dict) else None
     if isinstance(max_input_tokens, int):
@@ -161,9 +183,11 @@ def main(argv=None) -> None:
     else:
         print(f"note: no context-window profile for {model}; skipping auto-summarization")
 
+    subagent_tool = build_subagent_tool(resolved_model, pipeline, load_subagent_system_prompt())
+
     agent = create_agent(
         model,
-        tools=build_tools(pipeline, approvals),
+        tools=build_tools(pipeline, approvals) + [subagent_tool],
         system_prompt=load_system_prompt(),
         checkpointer=InMemorySaver(),
         middleware=middleware,
@@ -186,14 +210,12 @@ def main(argv=None) -> None:
             continue
         readline.add_history(user_input)
 
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": user_input}]}, config=config
+        interrupt_payload = stream_response(
+            agent, {"messages": [{"role": "user", "content": user_input}]}, config
         )
-        while "__interrupt__" in result:
-            decision = cli_decision(result["__interrupt__"][0].value)
-            result = agent.invoke(Command(resume=decision), config=config)
-
-        print(result["messages"][-1].text)
+        while interrupt_payload is not None:
+            decision = cli_decision(interrupt_payload)
+            interrupt_payload = stream_response(agent, Command(resume=decision), config)
     save_history(HISTORY_FILE)
 
 

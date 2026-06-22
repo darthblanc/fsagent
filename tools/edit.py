@@ -45,7 +45,7 @@ DESCRIPTION = (
 )
 
 
-def run(path, old_str: str, new_str: str,
+def run(path, old_str: str, new_str: str, replace_all: bool = False,
         tier_threshold: int = DEFAULT_SIZE_THRESHOLD) -> str:
     path = Path(path)
     if path.is_dir():
@@ -57,9 +57,11 @@ def run(path, old_str: str, new_str: str,
     if old_str == new_str:
         raise ToolError("old_str and new_str are identical — nothing to change")
     old_text = read_bytes(path).decode("utf-8", errors="replace")
-    failure = unique_match_failure(old_text, old_str)
-    if failure:
-        raise FrictionRequired(failure)
+    count = old_text.count(old_str)
+    if not (count > 1 and replace_all):
+        failure = unique_match_failure(old_text, old_str)
+        if failure:
+            raise FrictionRequired(failure, kwarg="replace_all" if count > 1 else None)
     replace_bytes(path, old_str.encode("utf-8"), new_str.encode("utf-8"))
     new_text = old_text.replace(old_str, new_str)
     diff = unified_diff(old_text, new_text, path.name)

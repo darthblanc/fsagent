@@ -1,10 +1,13 @@
-"""Tool wrappers and the human approval gate for OVERWRITE/RECURSIVE friction.
+"""Tool wrappers and the human approval gate for friction.
 
-UNIQUE_MATCH friction passes straight through as a ToolException — the
-model retries with corrected old_str/new_str itself (the existing
-two-attempt protocol). OVERWRITE/RECURSIVE pause the run via interrupt()
-and ask the human, who can approve once ("yes") or for the rest of the
-session ("always").
+Every FrictionRequired carries a `kwarg` (set in core/friction.py — the only
+place that knows which check fired): the parameter the agent layer should
+force to True on a human-approved retry, or None when there's nothing to
+force and the model must self-correct instead (a zero-match edit). Gated
+kwargs (overwrite, recursive, replace_all) pause the run via interrupt() and
+ask the human, who can approve once ("yes") or, for overwrite/recursive,
+for the rest of the session ("always") — replace_all always re-asks, since
+each ambiguous edit is a fresh decision.
 """
 
 from langchain_core.tools import StructuredTool, ToolException
@@ -13,8 +16,6 @@ from langgraph.types import interrupt
 from agent.schema import args_schema_for
 from core.errors import FrictionRequired, ToolError
 from tools import ALL_TOOLS
-
-_CONFIRM_KWARGS = {"overwrite=true": "overwrite", "recursive=true": "recursive"}
 
 
 class Approvals:
@@ -38,17 +39,17 @@ def _make_handler(tool, pipeline, approvals):
             return pipeline.call(name, **kwargs)
         except FrictionRequired as error:
             message = str(error)
-            kwarg = next((k for pat, k in _CONFIRM_KWARGS.items() if pat in message), None)
+            kwarg = error.kwarg
             if kwarg is None:
-                raise ToolException(message)  # UNIQUE_MATCH — model self-corrects, no gate
+                raise ToolException(message)  # zero-match edit — model self-corrects, no gate
             if not approvals.is_allowed(kwarg):
                 decision = interrupt({"tool": name, "args": kwargs, "message": message})
-                if decision == "always":
-                    approvals.allow_always(kwarg)
-                elif decision != "yes":
+                if decision not in ("yes", "always"):
                     raise ToolException(
                         f"the user did not approve this {kwarg} — try a different approach"
                     )
+                if decision == "always" and kwarg != "replace_all":
+                    approvals.allow_always(kwarg)
             try:
                 return pipeline.call(name, **{**kwargs, kwarg: True})
             except ToolError as second_error:
@@ -60,7 +61,8 @@ def _make_handler(tool, pipeline, approvals):
     return handler
 
 
-def build_tools(pipeline, approvals) -> list[StructuredTool]:
+def build_tools(pipeline, approvals, tools=None) -> list[StructuredTool]:
+    tools = ALL_TOOLS.values() if tools is None else tools
     return [
         StructuredTool.from_function(
             func=_make_handler(tool, pipeline, approvals),
@@ -68,5 +70,5 @@ def build_tools(pipeline, approvals) -> list[StructuredTool]:
             description=tool.description,
             args_schema=args_schema_for(tool),
         )
-        for tool in ALL_TOOLS.values()
+        for tool in tools
     ]

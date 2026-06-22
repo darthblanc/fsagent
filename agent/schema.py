@@ -12,8 +12,12 @@ from pydantic import BaseModel, Field, create_model
 
 from core.tool import Tool
 
-# Injected by Pipeline._handler_extras — never model-settable.
-_EXCLUDED = {"policy", "tier_threshold", "sandbox_root"}
+# Injected by Pipeline._handler_extras, or a friction-confirmation flag the
+# agent layer sets only after a human approves a retry — never model-settable.
+_EXCLUDED = {
+    "policy", "tier_threshold", "sandbox_root",
+    "overwrite", "recursive", "replace_all",
+}
 
 # (tool_name, param_name) -> (annotation, Field) overrides, for params whose
 # handler signature doesn't carry enough type information on its own.

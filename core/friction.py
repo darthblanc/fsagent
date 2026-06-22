@@ -45,8 +45,9 @@ def unique_match_failure(content: str, old_str: str) -> str | None:
         start = index + len(old_str)
     listed = ", ".join(str(n) for n in numbers)
     return (
-        f"matched {count} locations (lines {listed}) — "
-        "include more surrounding context to disambiguate"
+        f"matched {count} locations (lines {listed}) — pass replace_all=true "
+        "to replace all of them, or include more surrounding context to "
+        "disambiguate one"
     )
 
 
@@ -113,7 +114,7 @@ class StandardFriction:
             return
         failure = non_empty_folder_failure(target)
         if failure:
-            raise FrictionRequired(failure)
+            raise FrictionRequired(failure, kwarg="recursive")
 
     def _check_unique_match(self, args: dict) -> None:
         target = args.get("path")
@@ -121,9 +122,12 @@ class StandardFriction:
         if target is None or old_str is None or not Path(target).is_file():
             return  # missing file is the handler's failure to shape
         content = Path(target).read_bytes().decode("utf-8", "replace")
+        count = content.count(old_str)
+        if count > 1 and args.get("replace_all"):
+            return  # informed action — human approved replacing every match
         failure = unique_match_failure(content, old_str)
         if failure:
-            raise FrictionRequired(failure)
+            raise FrictionRequired(failure, kwarg="replace_all" if count > 1 else None)
 
     def _check_overwrite(self, definition: ToolDefinition, args: dict) -> None:
         if args.get("overwrite"):
@@ -133,7 +137,9 @@ class StandardFriction:
             # folder); an existing-folder dest is the handler's hint.
             dest = args["dest"]
             if Path(dest).is_file():
-                raise FrictionRequired(f"destination '{dest}' exists — pass overwrite=true")
+                raise FrictionRequired(
+                    f"destination '{dest}' exists — pass overwrite=true", kwarg="overwrite"
+                )
             return
         target = args.get("path")
         if target is None or not Path(target).is_file():
@@ -143,4 +149,4 @@ class StandardFriction:
         alternative = _OVERWRITE_ALTERNATIVES.get(definition.name)
         if alternative:
             message += f", or {alternative}"
-        raise FrictionRequired(message)
+        raise FrictionRequired(message, kwarg="overwrite")

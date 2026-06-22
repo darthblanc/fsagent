@@ -51,7 +51,7 @@ class Pipeline:
             resolved = dict(args)
             paths: list[Path] = []
             for key in PATH_ARGS:
-                if key in resolved:
+                if resolved.get(key) is not None:
                     resolved[key] = self._sandbox.resolve(resolved[key])
                     paths.append(resolved[key])
             tier = self._classify(paths)

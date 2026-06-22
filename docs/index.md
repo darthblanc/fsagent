@@ -36,5 +36,7 @@ on the previous one; every page links back here.
 
 ## Reference
 
-12. [Tool reference](tools/index.md) — one page per tool, with args, returns,
+12. [Agent & sub-agents](agent.md) — wiring tools to a model; the `explore`
+    read-only sub-agent and how it shares enforcement.
+13. [Tool reference](tools/index.md) — one page per tool, with args, returns,
     and verbatim failure examples.

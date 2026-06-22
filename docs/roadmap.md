@@ -12,7 +12,7 @@ resolved (the Resolved section keeps the history). Summary as of June 2026:
    makes "tier-1/2 deletions are recoverable" actionable; `fsagent
    empty-trash` pairs with it; `--scope` intersects the standing
    [policy](policy.md) as a narrowing wrapper. `agent/`, `cli/`, and
-   `prompts/` are otherwise built — see [Architecture](architecture.md#directory-map).
+   `prompts/` are otherwise built — see [Agent & sub-agents](agent.md).
 2. **Write/edit handler extensions** — format-aware write validation and
    structured edit selectors (a JSON path, a CSV cell), reusing the
    per-format handlers read/inspect already have.

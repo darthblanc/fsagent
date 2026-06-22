@@ -19,6 +19,9 @@
 | `old_str` | required; must be unique in the file |
 | `new_str` | required; empty = delete the text |
 
+Not model-settable: `replace_all`, set by the harness only after a human
+approves replacing every occurrence of an ambiguous `old_str` — see below.
+
 ## Returns
 
 Unified diff + tier flag, like [write](write.md).
@@ -31,7 +34,8 @@ win in one mechanism: a one-line change costs ~40 output tokens instead of a
 whole-file rewrite, and a stale or ambiguous match can never corrupt the
 file.
 
-**0 matches** — catches stale context by pointing at the nearest line:
+**0 matches** — catches stale context by pointing at the nearest line, and
+stays autonomous — you re-read and retry yourself, no approval needed:
 
 ```
 no exact match — nearest occurrence at line 87: 'revenue_2024 = 100' — re-read and retry with the current text
@@ -40,16 +44,19 @@ no exact match — nearest occurrence at line 87: 'revenue_2024 = 100' — re-re
 (or, when nothing is similar: `no exact match — re-read the file and retry
 with the current text`)
 
-**N > 1 matches** — catches ambiguity:
+**N > 1 matches** — catches ambiguity, and pauses for a human's approval to
+replace every match (see [Friction](../friction.md#unique_match--edit)):
 
 ```
-matched 3 locations (lines 12, 87, 240) — include more surrounding context to disambiguate
+matched 3 locations (lines 12, 87, 240) — pass replace_all=true to replace all of them, or include more surrounding context to disambiguate one
 ```
 
-Both leave the file untouched. Enforcement lives in the
-[friction stage](../friction.md) (`unique_match_failure`, shared with the
-handler as defense in depth), so the trajectory records these as friction
-denials.
+If approved, every occurrence is replaced with `new_str`; if declined, you
+get a denial and should narrow `old_str` with more context instead of
+retrying the same call. Both failures leave the file untouched. Enforcement
+lives in the [friction stage](../friction.md) (`unique_match_failure`,
+shared with the handler as defense in depth), so the trajectory records
+these as friction denials.
 
 ## Other failure shaping
 

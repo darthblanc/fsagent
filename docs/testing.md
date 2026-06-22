@@ -2,7 +2,7 @@
 
 [← wiki home](index.md)
 
-The suite (303 tests, `tests/`) was written strictly test-first: every
+The suite (417 tests, `tests/`) was written strictly test-first: every
 feature's tests were written and confirmed failing before its implementation
 existed; refactors happen only under green.
 

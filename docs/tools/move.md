@@ -13,7 +13,10 @@ One tool for both targets — one intent: "relocate this thing".
 
 ## Args
 
-`src` (required) · `dest` (required) · `overwrite` (default false).
+`src` (required) · `dest` (required).
+
+Not model-settable: `overwrite`, set by the harness only after a human
+approves replacing an existing destination file.
 
 ## Returns
 

@@ -11,7 +11,10 @@
 
 ## Args
 
-`path` (required) · `recursive` (default false).
+`path` (required).
+
+Not model-settable: `recursive`, set by the harness only after a human
+approves deleting a non-empty folder.
 
 ## Returns
 
@@ -25,8 +28,9 @@ tier 3 — contents NOT recoverable from history
 ## Friction-as-informed-consent
 
 A non-empty folder fails first with the census, so the `recursive=true`
-retry is an informed action — no human gate needed
-([Friction](../friction.md)):
+retry is an informed action. The pipeline stage itself doesn't block on a
+human — but the agent layer does, pausing for approval before the retry
+fires ([Friction](../friction.md)):
 
 ```
 '/sb/proj' contains 14 files, 3 subfolders — pass recursive=true to confirm

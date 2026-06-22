@@ -102,7 +102,10 @@ tests/                 the whole suite, written test-first
 sandbox/               the agent's world
 trajectories/          session logs
 agent/                 schema.py (Pydantic args_schema), tools.py (StructuredTool +
-                       Approvals/interrupt gate), __init__.py (load_system_prompt)
+                       Approvals/interrupt gate), subagent.py (the explore
+                       sub-agent), __init__.py (prompt loaders)
 cli/                   repl.py (the `fsagent` entry point), models.py (picker)
-prompts/               system.md — the model-facing behavior contract
+prompts/               system.md, subagent_system.md — the model-facing behavior contracts
 ```
+
+See [Agent & sub-agents](agent.md) for how an LLM is wired to this pipeline.

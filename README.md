@@ -16,7 +16,7 @@ never silently pretends reversibility where there is none.
 
 ```sh
 uv venv && uv pip install -e ".[dev]"
-uv run pytest        # 385 tests
+uv run pytest        # 417 tests
 ```
 
 ## Running the agent
@@ -105,6 +105,17 @@ A failure at any stage is still recorded in the trajectory. See
 A fifth group, **transform**, is reserved; [copy](docs/tools/copy.md) is the
 worked example for how it will enter the registry.
 
+## Sub-agents
+
+The agent has a thirteenth tool, `explore`, that delegates a read-only
+investigation to a nested agent restricted to `read`/`inspect`/`list_dir`/
+`glob`/`grep` — useful for open-ended searches that would otherwise burn the
+main agent's own context on every intermediate call. It shares the main
+agent's sandbox and policy enforcement exactly (not a separately-configured
+copy), can never trigger a friction gate (none of its tools declare one),
+and multiple `explore` calls in the same turn run concurrently for free. See
+[Agent & sub-agents](docs/agent.md).
+
 ## Documentation
 
 The wiki lives in [docs/](docs/index.md):
@@ -120,6 +131,7 @@ The wiki lives in [docs/](docs/index.md):
 - [Failure shaping](docs/failure-shaping.md) — errors as navigation aids
 - [Testing](docs/testing.md) — the TDD conventions
 - [Roadmap](docs/roadmap.md) — what's open and what's next
+- [Agent & sub-agents](docs/agent.md) — wiring tools to a model, the `explore` sub-agent
 - [Tool reference](docs/tools/index.md) — one page per tool
 
 Open design debts are tracked in [FLAGS.md](FLAGS.md).
@@ -131,10 +143,11 @@ core/          schema, pipeline, policy, friction, git, tiers, trajectory
 functions/     byte-level primitives — raw work only
 tools/         the 12 tool definitions + execute handlers
 configs/       policy.yaml (standing rules), models.yaml (picker choices)
-agent/         StructuredTool wrappers, args schemas, system prompt loader
+agent/         StructuredTool wrappers, args schemas, system prompt loader,
+               subagent.py — the read-only `explore` sub-agent tool
 cli/           the `fsagent` REPL entry point, model picker
-prompts/       system.md — the model-facing behavior contract
-tests/         385 tests, written test-first
+prompts/       system.md, subagent_system.md — the model-facing behavior contracts
+tests/         417 tests, written test-first
 sandbox/       where the world ends — the agent acts only in here
 trajectories/  session JSONL logs
 ```

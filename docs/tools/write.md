@@ -16,7 +16,9 @@
 |---|---|---|
 | `path` | required | |
 | `content` | required | |
-| `overwrite` | false | required to replace an existing file |
+
+Not model-settable: `overwrite`, set by the harness only after a human
+approves replacing an existing file — see Friction below.
 
 ## Returns
 
@@ -37,7 +39,8 @@ cheaper alternative ([Friction](../friction.md)):
 '/sb/report.txt' exists (421 lines) — pass overwrite=true, or use edit
 ```
 
-The second call with `overwrite=true` is an informed action.
+The retry that carries `overwrite=true` is an informed action — and only the
+harness can set it, after a human approves; the model can't pass it itself.
 
 ## Failure shaping
 

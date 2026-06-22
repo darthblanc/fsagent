@@ -49,6 +49,25 @@ class TestReplacement:
         result = run(path, old_str="target", new_str="hit", tier_threshold=50)
         assert "tier 3 — this change is NOT reversible" in result
 
+    def test_replace_all_replaces_every_occurrence(self, tmp_path):
+        path = tmp_path / "r.txt"
+        path.write_text("foo\nbar\nfoo\nbaz\nfoo\n")
+        result = run(path, old_str="foo", new_str="FOO", replace_all=True)
+        assert path.read_text() == "FOO\nbar\nFOO\nbaz\nFOO\n"
+        assert "-foo" in result and "+FOO" in result
+
+    def test_replace_all_with_single_match_behaves_normally(self, tmp_path):
+        path = tmp_path / "r.txt"
+        path.write_text("alpha\nbeta\ngamma\n")
+        run(path, old_str="beta", new_str="BETA", replace_all=True)
+        assert path.read_text() == "alpha\nBETA\ngamma\n"
+
+    def test_replace_all_does_not_rescue_zero_matches(self, tmp_path):
+        path = tmp_path / "r.txt"
+        path.write_text("bar\n")
+        with pytest.raises(FrictionRequired, match="no exact match"):
+            run(path, old_str="foo", new_str="x", replace_all=True)
+
 
 class TestFailureShaping:
     def test_zero_matches_points_at_nearest_occurrence(self, tmp_path):
@@ -77,8 +96,9 @@ class TestFailureShaping:
         with pytest.raises(FrictionRequired) as exc:
             run(path, old_str="foo", new_str="x")
         assert str(exc.value) == (
-            "matched 3 locations (lines 1, 3, 5) — "
-            "include more surrounding context to disambiguate"
+            "matched 3 locations (lines 1, 3, 5) — pass replace_all=true to "
+            "replace all of them, or include more surrounding context to "
+            "disambiguate one"
         )
         assert path.read_text() == "foo\nbar\nfoo\nbaz\nfoo\n"
 

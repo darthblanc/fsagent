@@ -1,7 +1,10 @@
 from agent.schema import args_schema_for
 from tools import ALL_TOOLS
 
-_EXCLUDED = {"policy", "tier_threshold", "sandbox_root"}
+_EXCLUDED = {
+    "policy", "tier_threshold", "sandbox_root",
+    "overwrite", "recursive", "replace_all",
+}
 
 
 def schema_for(name):
@@ -10,10 +13,8 @@ def schema_for(name):
 
 def test_write_schema():
     schema = schema_for("write")
-    assert set(schema["properties"]) == {"path", "content", "overwrite"}
+    assert set(schema["properties"]) == {"path", "content"}
     assert schema["required"] == ["path", "content"]
-    assert schema["properties"]["overwrite"]["type"] == "boolean"
-    assert schema["properties"]["overwrite"]["default"] is False
 
 
 def test_edit_schema():
@@ -36,16 +37,14 @@ def test_create_dir_schema():
 
 def test_delete_schema_excludes_pipeline_extras():
     schema = schema_for("delete")
-    assert set(schema["properties"]) == {"path", "recursive"}
+    assert set(schema["properties"]) == {"path"}
     assert schema["required"] == ["path"]
-    assert schema["properties"]["recursive"]["type"] == "boolean"
-    assert schema["properties"]["recursive"]["default"] is False
 
 
 def test_move_and_copy_schema():
     for name in ("move", "copy"):
         schema = schema_for(name)
-        assert set(schema["properties"]) == {"src", "dest", "overwrite"}
+        assert set(schema["properties"]) == {"src", "dest"}
         assert schema["required"] == ["src", "dest"]
 
 

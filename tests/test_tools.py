@@ -5,6 +5,7 @@ from agent.tools import Approvals, build_tools
 from cli.repl import ToolActivityCallback
 from core.policy import PolicyDecision
 from tests.test_pipeline import make_pipeline
+from tools import ALL_TOOLS
 
 
 class DenyWrite:
@@ -16,6 +17,13 @@ class DenyWrite:
 
 def get_tool(tools, name):
     return next(t for t in tools if t.name == name)
+
+
+def test_build_tools_accepts_explicit_subset(tmp_path):
+    pipeline, _, _ = make_pipeline(tmp_path)
+    tools = build_tools(pipeline, Approvals(), tools=[ALL_TOOLS["read"]])
+
+    assert [t.name for t in tools] == ["read"]
 
 
 def test_write_succeeds_on_fresh_path(tmp_path):
@@ -56,12 +64,12 @@ def test_policy_denial_raises_tool_exception(tmp_path):
     )
 
 
-def test_unique_match_is_autonomous_no_interrupt(tmp_path, monkeypatch):
+def test_unique_match_zero_match_is_autonomous_no_interrupt(tmp_path, monkeypatch):
     pipeline, root, _ = make_pipeline(tmp_path)
     (root / "a.txt").write_text("one\ntwo\nthree\n")
 
     def boom(payload):
-        raise AssertionError("interrupt should not be called for UNIQUE_MATCH")
+        raise AssertionError("interrupt should not be called for a zero-match edit")
 
     monkeypatch.setattr("agent.tools.interrupt", boom)
     tools = build_tools(pipeline, Approvals())
@@ -71,6 +79,93 @@ def test_unique_match_is_autonomous_no_interrupt(tmp_path, monkeypatch):
         edit.func(path="a.txt", old_str="nonexistent", new_str="x")
 
     assert "re-read and retry" in str(excinfo.value)
+
+
+def test_unique_match_ambiguous_interrupt_yes_replaces_all(tmp_path, monkeypatch):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("foo\nbar\nfoo\n")
+    monkeypatch.setattr("agent.tools.interrupt", lambda payload: "yes")
+    tools = build_tools(pipeline, Approvals())
+    edit = get_tool(tools, "edit")
+
+    result = edit.func(path="a.txt", old_str="foo", new_str="FOO")
+
+    assert (root / "a.txt").read_text() == "FOO\nbar\nFOO\n"
+    assert "+FOO" in result
+
+
+def test_unique_match_ambiguous_declined_raises_tool_exception(tmp_path, monkeypatch):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("foo\nbar\nfoo\n")
+    monkeypatch.setattr("agent.tools.interrupt", lambda payload: "no")
+    tools = build_tools(pipeline, Approvals())
+    edit = get_tool(tools, "edit")
+
+    with pytest.raises(ToolException) as excinfo:
+        edit.func(path="a.txt", old_str="foo", new_str="FOO")
+
+    assert "did not approve" in str(excinfo.value)
+    assert (root / "a.txt").read_text() == "foo\nbar\nfoo\n"
+
+
+def test_unique_match_ambiguous_always_does_not_persist(tmp_path, monkeypatch):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("foo\nbar\nfoo\n")
+    (root / "b.txt").write_text("baz\nfoo\nfoo\n")
+    calls = []
+    monkeypatch.setattr("agent.tools.interrupt", lambda payload: calls.append(payload) or "always")
+    approvals = Approvals()
+    tools = build_tools(pipeline, approvals)
+    edit = get_tool(tools, "edit")
+
+    edit.func(path="a.txt", old_str="foo", new_str="FOO")
+    edit.func(path="b.txt", old_str="foo", new_str="FOO")
+
+    assert len(calls) == 2  # "always" must not suppress the second prompt
+    assert not approvals.is_allowed("replace_all")
+
+
+def test_unique_match_ambiguous_interrupt_payload_shape(tmp_path, monkeypatch):
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "a.txt").write_text("foo\nbar\nfoo\n")
+    captured = {}
+
+    def fake_interrupt(payload):
+        captured.update(payload)
+        return "yes"
+
+    monkeypatch.setattr("agent.tools.interrupt", fake_interrupt)
+    tools = build_tools(pipeline, Approvals())
+    edit = get_tool(tools, "edit")
+
+    edit.func(path="a.txt", old_str="foo", new_str="FOO")
+
+    assert captured["tool"] == "edit"
+    assert captured["message"] == (
+        "matched 2 locations (lines 1, 3) — pass replace_all=true to "
+        "replace all of them, or include more surrounding context to "
+        "disambiguate one"
+    )
+
+
+def test_model_supplied_overwrite_is_dropped_by_schema_validation(tmp_path, monkeypatch):
+    """Regression test for the self-approval bypass: a model can no longer
+    smuggle overwrite=true through its own tool call — Pydantic silently
+    drops the field since it's excluded from the schema, so the friction
+    gate always fires and interrupt() is always reached, even when the
+    model's raw call already says overwrite=true."""
+    pipeline, root, _ = make_pipeline(tmp_path)
+    (root / "r.txt").write_text("old\n")
+    calls = []
+    monkeypatch.setattr("agent.tools.interrupt", lambda payload: calls.append(payload) or "no")
+    tools = build_tools(pipeline, Approvals())
+    write = get_tool(tools, "write")
+
+    with pytest.raises(ToolException, match="did not approve"):
+        write.invoke({"path": "r.txt", "content": "clobbered\n", "overwrite": True})
+
+    assert len(calls) == 1  # interrupt() was reached despite the model's overwrite=True
+    assert (root / "r.txt").read_text() == "old\n"
 
 
 def test_overwrite_interrupt_yes_allows_once(tmp_path, monkeypatch):
@@ -219,7 +314,7 @@ def test_edit_tool_invoke_triggers_callback_with_diff(tmp_path, capsys):
     assert "+new" in out
 
 
-def test_read_tool_invoke_triggers_start_print_only(tmp_path, capsys):
+def test_read_tool_invoke_triggers_callback_with_path_and_content(tmp_path, capsys):
     pipeline, root, _ = make_pipeline(tmp_path)
     (root / "a.txt").write_text("hello\n")
     tools = build_tools(pipeline, Approvals())
@@ -230,4 +325,4 @@ def test_read_tool_invoke_triggers_start_print_only(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "[read] a.txt" in out
-    assert "hello" not in out
+    assert "hello" in out

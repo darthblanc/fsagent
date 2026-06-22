@@ -7,6 +7,7 @@ import pytest
 from langchain.agents.middleware import SummarizationMiddleware
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.messages import ToolMessage
+from langchain_core.tools import StructuredTool
 from langgraph.types import Interrupt
 
 from cli.models import load_model_config
@@ -21,6 +22,7 @@ from cli.repl import (
     main,
     make_session_id,
     save_history,
+    stream_response,
 )
 
 
@@ -138,13 +140,31 @@ def test_on_tool_start_prints_path_and_action_for_watched_tools(capsys):
     assert "[write] note.txt" in capsys.readouterr().out
 
 
-def test_on_tool_start_ignores_unwatched_tools(capsys):
+def test_on_tool_start_prints_header_for_any_tool(capsys):
     callback = ToolActivityCallback()
     run_id = uuid.uuid4()
 
     callback.on_tool_start({"name": "list_dir"}, "", run_id=run_id, inputs={"path": "."})
 
-    assert capsys.readouterr().out == ""
+    assert "[list_dir] ." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "inputs, expected_label",
+    [
+        ({"src": "a.txt", "dest": "b.txt"}, "a.txt"),
+        ({"pattern": "TODO", "scope": "src"}, "TODO"),
+        ({"task": "find the config loader"}, "find the config loader"),
+        ({"limit": 50}, ""),
+    ],
+)
+def test_on_tool_start_falls_back_through_label_keys(capsys, inputs, expected_label):
+    callback = ToolActivityCallback()
+    run_id = uuid.uuid4()
+
+    callback.on_tool_start({"name": "tool"}, "", run_id=run_id, inputs=inputs)
+
+    assert f"[tool] {expected_label}" in capsys.readouterr().out
 
 
 def test_on_tool_end_prints_diff_for_write(capsys):
@@ -178,7 +198,7 @@ def test_on_tool_end_unwraps_tool_message_content(capsys):
     assert out == diff + "\n"
 
 
-def test_on_tool_end_does_not_print_for_read(capsys):
+def test_on_tool_end_prints_result_for_read(capsys):
     callback = ToolActivityCallback()
     run_id = uuid.uuid4()
     callback.on_tool_start({"name": "read"}, "", run_id=run_id, inputs={"path": "note.txt"})
@@ -186,7 +206,7 @@ def test_on_tool_end_does_not_print_for_read(capsys):
 
     callback.on_tool_end("     1\thello", run_id=run_id)
 
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == "     1\thello\n"
 
 
 def test_on_tool_end_for_unknown_run_id_does_not_raise():
@@ -218,9 +238,56 @@ class FakeAgent:
         self._responses = list(responses)
         self.configs = []
 
-    def invoke(self, _input, config=None):
+    def stream(self, _input, config=None, stream_mode=None):
         self.configs.append(config)
-        return self._responses.pop(0)
+        yield from self._responses.pop(0)
+
+
+def test_stream_response_prints_text_chunks_and_trailing_newline(capsys):
+    fake_agent = FakeAgent([[
+        ("messages", (FakeMessage("hel"), {})),
+        ("messages", (FakeMessage("lo"), {})),
+    ]])
+
+    result = stream_response(fake_agent, {"messages": []}, config={})
+
+    assert capsys.readouterr().out == "hello\n"
+    assert result is None
+
+
+def test_stream_response_skips_empty_text_chunks(capsys):
+    fake_agent = FakeAgent([[
+        ("messages", (FakeMessage(""), {})),
+        ("messages", (FakeMessage("ok"), {})),
+    ]])
+
+    stream_response(fake_agent, {"messages": []}, config={})
+
+    assert capsys.readouterr().out == "ok\n"
+
+
+def test_stream_response_skips_tool_message_content(capsys):
+    # Tool output is already printed by ToolActivityCallback; stream_response
+    # must not also print it, or results show up duplicated and run together
+    # with the model's own text (no separating newline between the two).
+    fake_agent = FakeAgent([[
+        ("messages", (ToolMessage(content="tool output", name="read", tool_call_id="1"), {})),
+        ("messages", (FakeMessage("answer"), {})),
+    ]])
+
+    stream_response(fake_agent, {"messages": []}, config={})
+
+    assert capsys.readouterr().out == "answer\n"
+
+
+def test_stream_response_returns_interrupt_payload_without_trailing_newline(capsys):
+    payload = {"tool": "write", "args": {}, "message": "exists"}
+    fake_agent = FakeAgent([[("values", {"__interrupt__": (Interrupt(value=payload),)})]])
+
+    result = stream_response(fake_agent, {"messages": []}, config={})
+
+    assert result == payload
+    assert capsys.readouterr().out == ""
 
 
 def _drive_input(values):
@@ -241,7 +308,7 @@ def test_main_simple_round_trip(tmp_path, monkeypatch, capsys):
     (tmp_path / "sandbox").mkdir()
     (tmp_path / "trajectories").mkdir()
 
-    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    fake_agent = FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
     monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
 
@@ -262,8 +329,8 @@ def test_main_handles_interrupt_and_resumes(tmp_path, monkeypatch, capsys):
         "message": "'r.txt' exists (1 lines) — pass overwrite=true, or use edit",
     }
     responses = [
-        {"messages": [FakeMessage("")], "__interrupt__": (Interrupt(value=interrupt_payload),)},
-        {"messages": [FakeMessage("done")]},
+        [("values", {"__interrupt__": (Interrupt(value=interrupt_payload),)})],
+        [("messages", (FakeMessage("done"), {}))],
     ]
     fake_agent = FakeAgent(responses)
     monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
@@ -283,7 +350,7 @@ def test_main_tags_agent_config_for_observability(tmp_path, monkeypatch, capsys)
     (tmp_path / "trajectories").mkdir()
     monkeypatch.setattr("cli.repl.make_session_id", lambda: "s-test")
 
-    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    fake_agent = FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
     monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
 
@@ -301,7 +368,7 @@ def test_main_attaches_tool_activity_callback(tmp_path, monkeypatch, capsys):
     (tmp_path / "sandbox").mkdir()
     (tmp_path / "trajectories").mkdir()
 
-    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    fake_agent = FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
     monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
 
@@ -322,7 +389,7 @@ def test_main_uses_model_flag(tmp_path, monkeypatch, capsys):
 
     def fake_create_agent(model, **kwargs):
         captured_models.append(model)
-        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
 
     monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
@@ -331,6 +398,32 @@ def test_main_uses_model_flag(tmp_path, monkeypatch, capsys):
 
     assert captured_models == ["ollama:qwen3:8b"]
     assert "model: ollama:qwen3:8b" in capsys.readouterr().out
+
+
+def test_main_wires_explore_tool_into_main_agent(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    fake_explore_tool = StructuredTool.from_function(
+        func=lambda task: "ok", name="explore", description="delegate a read-only task"
+    )
+    monkeypatch.setattr("cli.repl.build_subagent_tool", lambda *a, **k: fake_explore_tool)
+
+    captured = {}
+
+    def fake_create_agent(model, **kwargs):
+        captured.update(kwargs)
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
+
+    monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "anthropic:claude-opus-4-8"])
+
+    tool_names = [t.name for t in captured["tools"]]
+    assert "explore" in tool_names
 
 
 def test_load_history_missing_file_does_not_raise(tmp_path):
@@ -368,7 +461,7 @@ def test_main_persists_history(tmp_path, monkeypatch, capsys):
     history_path = tmp_path / "history"
     monkeypatch.setattr("cli.repl.HISTORY_FILE", history_path)
 
-    fake_agent = FakeAgent([{"messages": [FakeMessage("hello there")]}])
+    fake_agent = FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
     monkeypatch.setattr("cli.repl.create_agent", lambda *a, **k: fake_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
 
@@ -388,7 +481,7 @@ def test_main_enables_anthropic_prompt_caching(tmp_path, monkeypatch, capsys):
 
     def fake_create_agent(model, **kwargs):
         captured_kwargs.update(kwargs)
-        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
 
     monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
@@ -398,6 +491,27 @@ def test_main_enables_anthropic_prompt_caching(tmp_path, monkeypatch, capsys):
     middleware = captured_kwargs["middleware"]
     assert len(middleware) == 2
     assert isinstance(middleware[0], AnthropicPromptCachingMiddleware)
+
+
+def test_main_skips_anthropic_prompt_caching_for_non_anthropic_model(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("cli.repl.SANDBOX_ROOT", tmp_path / "sandbox")
+    monkeypatch.setattr("cli.repl.TRAJECTORIES_DIR", tmp_path / "trajectories")
+    (tmp_path / "sandbox").mkdir()
+    (tmp_path / "trajectories").mkdir()
+
+    captured_kwargs = {}
+
+    def fake_create_agent(model, **kwargs):
+        captured_kwargs.update(kwargs)
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
+
+    monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
+    monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
+
+    main(["--model", "ollama:qwen3:8b"])
+
+    middleware = captured_kwargs["middleware"]
+    assert not any(isinstance(m, AnthropicPromptCachingMiddleware) for m in middleware)
 
 
 def test_main_enables_summarization_middleware(tmp_path, monkeypatch, capsys):
@@ -410,7 +524,7 @@ def test_main_enables_summarization_middleware(tmp_path, monkeypatch, capsys):
 
     def fake_create_agent(model, **kwargs):
         captured_kwargs.update(kwargs)
-        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
 
     monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
@@ -461,7 +575,7 @@ def test_main_skips_summarization_for_model_without_profile(tmp_path, monkeypatc
 
     def fake_create_agent(model, **kwargs):
         captured_kwargs.update(kwargs)
-        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
 
     monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
     monkeypatch.setattr("builtins.input", _drive_input(["hi", EOFError]))
@@ -483,7 +597,7 @@ def test_main_without_flag_uses_picker(tmp_path, monkeypatch, capsys):
 
     def fake_create_agent(model, **kwargs):
         captured_models.append(model)
-        return FakeAgent([{"messages": [FakeMessage("hello there")]}])
+        return FakeAgent([[("messages", (FakeMessage("hello there"), {}))]])
 
     monkeypatch.setattr("cli.repl.create_agent", fake_create_agent)
     # First input() answers the model picker (empty -> default), second is the chat turn.

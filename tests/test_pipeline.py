@@ -148,6 +148,22 @@ class TestGlobThroughPipeline:
         with pytest.raises(SandboxViolation):
             pipeline.call("glob", pattern="*", scope="..")
 
+    def test_explicit_scope_none_defaults_to_sandbox_root(self, tmp_path):
+        # Pydantic fills the handler's scope=None default into kwargs when
+        # the model omits it via StructuredTool.invoke() — unlike the test
+        # suite's direct tool.func() calls, the key is present with value
+        # None, not absent. Must behave the same as omitting it entirely.
+        pipeline, root, _ = make_pipeline(tmp_path)
+        (root / "a.txt").write_text("x")
+        assert pipeline.call("glob", pattern="*.txt", scope=None) == "a.txt"
+
+
+class TestGrepThroughPipeline:
+    def test_explicit_scope_none_defaults_to_sandbox_root(self, tmp_path):
+        pipeline, root, _ = make_pipeline(tmp_path)
+        (root / "a.txt").write_text("alpha\n")
+        assert pipeline.call("grep", pattern="alpha", scope=None) == "a.txt · 1"
+
 
 def commit_count(root):
     result = subprocess.run(

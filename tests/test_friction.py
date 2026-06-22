@@ -19,6 +19,7 @@ class TestOverwriteFriction:
         with pytest.raises(FrictionRequired) as exc:
             gate.check(WRITE_DEFINITION, {"path": path, "content": "x"})
         assert str(exc.value) == f"'{path}' exists (3 lines) — pass overwrite=true, or use edit"
+        assert exc.value.kwarg == "overwrite"
 
     def test_overwrite_true_is_an_informed_action(self, gate, tmp_path):
         path = tmp_path / "r.txt"
@@ -49,6 +50,7 @@ class TestMoveOverwriteFriction:
         with pytest.raises(FrictionRequired) as exc:
             gate.check(move_definition, {"src": src, "dest": dest})
         assert str(exc.value) == f"destination '{dest}' exists — pass overwrite=true"
+        assert exc.value.kwarg == "overwrite"
 
     def test_overwrite_true_is_an_informed_action(self, gate, tmp_path, move_definition):
         dest = tmp_path / "b.txt"
@@ -80,6 +82,7 @@ class TestRecursiveFriction:
         assert str(exc.value) == (
             f"'{folder}' contains 2 files, 1 subfolders — pass recursive=true to confirm"
         )
+        assert exc.value.kwarg == "recursive"
 
     def test_recursive_true_is_an_informed_action(self, gate, tmp_path, delete_definition):
         folder = tmp_path / "proj"
@@ -108,14 +111,34 @@ class TestUniqueMatchFriction:
     def test_ambiguous_match_is_friction_denied(self, gate, tmp_path):
         path = tmp_path / "r.txt"
         path.write_text("foo\nfoo\n")
-        with pytest.raises(FrictionRequired, match="matched 2 locations"):
+        with pytest.raises(FrictionRequired, match="matched 2 locations") as exc:
             gate.check(EDIT_DEFINITION, {"path": path, "old_str": "foo", "new_str": "x"})
+        assert exc.value.kwarg == "replace_all"
+
+    def test_ambiguous_match_with_replace_all_is_an_informed_action(self, gate, tmp_path):
+        path = tmp_path / "r.txt"
+        path.write_text("foo\nfoo\n")
+        gate.check(
+            EDIT_DEFINITION,
+            {"path": path, "old_str": "foo", "new_str": "x", "replace_all": True},
+        )
 
     def test_zero_matches_is_friction_denied(self, gate, tmp_path):
         path = tmp_path / "r.txt"
         path.write_text("bar\n")
-        with pytest.raises(FrictionRequired, match="no exact match"):
+        with pytest.raises(FrictionRequired, match="no exact match") as exc:
             gate.check(EDIT_DEFINITION, {"path": path, "old_str": "foo", "new_str": "x"})
+        assert exc.value.kwarg is None
+
+    def test_zero_matches_ignores_replace_all(self, gate, tmp_path):
+        # replace_all can't manufacture text that doesn't exist in the file.
+        path = tmp_path / "r.txt"
+        path.write_text("bar\n")
+        with pytest.raises(FrictionRequired, match="no exact match"):
+            gate.check(
+                EDIT_DEFINITION,
+                {"path": path, "old_str": "foo", "new_str": "x", "replace_all": True},
+            )
 
     def test_unique_match_passes(self, gate, tmp_path):
         path = tmp_path / "r.txt"
